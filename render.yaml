@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: aqi-memory-backend
+    runtime: python
+    region: singapore          # Closest to India for lower scrape latency
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1 --loop uvloop
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.4"
+      - key: DB_PATH
+        value: /data/aqi_memory.db
+      - key: LOG_LEVEL
+        value: INFO
+      - key: CORS_ORIGINS
+        sync: false            # Set manually in Render dashboard to your Vercel URL
+    disk:
+      name: aqi-data
+      mountPath: /data
+      sizeGB: 1                # Upgrade to 10GB if you plan to keep >1 year of data
+    autoDeploy: true
