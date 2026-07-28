@@ -117,8 +117,8 @@ export default function EditsPage() {
         const color = SEVERITY_COLORS[row.severity] ?? "#6b7280";
         return (
           <span
-            className="px-2 py-0.5 rounded text-xs font-medium capitalize"
-            style={{ color, border: `1px solid ${color}` }}
+            className="px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize"
+            style={{ color, border: `1px solid ${color}40`, backgroundColor: `${color}12` }}
           >
             {row.severity}
           </span>
@@ -128,13 +128,19 @@ export default function EditsPage() {
   ];
 
   return (
-    <div className="page-fade px-4 lg:px-8 py-8 max-w-6xl mx-auto pb-24 lg:pb-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--text-primary)" }}>
+    <div className="page-fade px-5 lg:px-8 py-8 max-w-6xl mx-auto pb-24 lg:pb-10">
+      <div className="mb-8">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: "var(--danger)", boxShadow: "0 0 6px var(--danger)" }} />
+          <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--danger)" }}>
+            Live mutation log
+          </span>
+        </div>
+        <h1 className="text-3xl font-extrabold tracking-tight mb-1" style={{ color: "var(--text-primary)", letterSpacing: "-0.02em" }}>
           Edit Tracker
         </h1>
         <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-          Every time CPCB silently changes a published reading, we log it here.
+          Every time CPCB silently changes a published reading, we log it here permanently.
         </p>
       </div>
 
@@ -181,13 +187,13 @@ export default function EditsPage() {
           ].map(({ label, value }) => (
             <div
               key={label}
-              className="rounded-lg p-3 border text-center"
+              className="stat-card rounded-xl p-4 border card-hover text-center"
               style={{ backgroundColor: "var(--bg-card)", borderColor: "var(--border)" }}
             >
-              <div className="text-lg font-mono font-bold" style={{ color: "var(--text-primary)" }}>
+              <div className="text-2xl font-mono font-bold tracking-tight mb-0.5" style={{ color: "var(--text-primary)" }}>
                 {value}
               </div>
-              <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+              <div className="text-xs" style={{ color: "var(--text-muted)" }}>
                 {label}
               </div>
             </div>

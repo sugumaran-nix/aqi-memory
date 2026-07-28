@@ -79,24 +79,35 @@ export default function CityPage() {
   const exportUrl = buildExportUrl({ city, start_date: dateRange.start, end_date: dateRange.end, station_id: selectedStation });
 
   return (
-    <div className="page-fade px-4 lg:px-8 py-8 max-w-6xl mx-auto">
+    <div className="page-fade px-5 lg:px-8 py-8 max-w-6xl mx-auto pb-24 lg:pb-10">
       {/* Header */}
-      <section aria-label="City overview" className="mb-6">
+      <section aria-label="City overview" className="mb-8">
         {summaryLoading ? (
-          <SkeletonCard lines={2} className="max-w-sm" />
+          <div className="space-y-3">
+            <div className="skeleton h-8 w-48 rounded" />
+            <div className="skeleton h-5 w-32 rounded" />
+            <div className="skeleton h-12 w-full rounded-xl" />
+          </div>
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-3 mb-2">
-              <h1 className="text-3xl font-bold" style={{ color: "var(--text-primary)" }}>
+            <div className="flex flex-wrap items-end gap-4 mb-2">
+              <h1 className="text-4xl font-extrabold tracking-tight" style={{ color: "var(--text-primary)", letterSpacing: "-0.03em" }}>
                 {displayCity}
               </h1>
               <AQIBadge aqi={summary?.current_aqi} size="lg" />
             </div>
-            <p className="text-sm mb-3" style={{ color: "var(--text-muted)" }}>
-              {summary?.state}
+            <p className="text-sm mb-4 flex items-center flex-wrap gap-2" style={{ color: "var(--text-muted)" }}>
+              <span>{summary?.state}</span>
               {summary?.dominant_pollutant && (
-                <span className="ml-3 px-2 py-0.5 rounded border text-xs" style={{ borderColor: "var(--border)" }}>
+                <span className="px-2 py-0.5 rounded-full border text-xs font-medium"
+                  style={{ borderColor: "var(--border)", backgroundColor: "var(--bg-card)", color: "var(--text-secondary)" }}>
                   Dominant: {summary.dominant_pollutant}
+                </span>
+              )}
+              {(summary?.stations?.length ?? 0) > 1 && (
+                <span className="px-2 py-0.5 rounded-full border text-xs font-medium"
+                  style={{ borderColor: "var(--border)", backgroundColor: "var(--bg-card)", color: "var(--text-secondary)" }}>
+                  {summary?.stations?.length} stations
                 </span>
               )}
             </p>
@@ -127,7 +138,7 @@ export default function CityPage() {
       )}
 
       {/* Chart */}
-      <section aria-label="Air quality chart" className="rounded-xl border p-5 mb-6" style={{ backgroundColor: "var(--bg-card)", borderColor: "var(--border)" }}>
+      <section aria-label="Air quality chart" className="rounded-2xl border p-5 mb-6 stat-card" style={{ backgroundColor: "var(--bg-card)", borderColor: "var(--border)" }}>
         <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
           <TimeRangePicker value={dateRange} onChange={setDateRange} />
           <a

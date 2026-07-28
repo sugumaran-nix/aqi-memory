@@ -2,26 +2,26 @@
 
 interface SkeletonCardProps {
   lines?: number;
-  className?: string;
 }
 
-export default function SkeletonCard({ lines = 3, className = "" }: SkeletonCardProps) {
+export default function SkeletonCard({ lines = 3 }: SkeletonCardProps) {
   return (
     <div
-      className={`rounded-xl p-5 border ${className}`}
+      className="rounded-xl p-5 border"
       style={{ backgroundColor: "var(--bg-card)", borderColor: "var(--border)" }}
     >
-      <div className="skeleton h-5 w-1/2 mb-4 rounded" />
-      {Array.from({ length: lines }).map((_, i) => (
-        <div
-          key={i}
-          className="skeleton mb-3 rounded"
-          style={{
-            height: "12px",
-            width: i === lines - 1 ? "60%" : "100%",
-          }}
-        />
-      ))}
+      <div className="flex items-start justify-between mb-4">
+        <div className="space-y-2 flex-1">
+          <div className="skeleton h-4 w-28 rounded" />
+          <div className="skeleton h-3 w-16 rounded" />
+        </div>
+        <div className="skeleton h-7 w-16 rounded-full" />
+      </div>
+      <div className="space-y-2">
+        {[...Array(lines - 2 > 0 ? lines - 2 : 1)].map((_, i) => (
+          <div key={i} className={`skeleton h-3 rounded ${i % 2 === 0 ? "w-full" : "w-3/4"}`} />
+        ))}
+      </div>
     </div>
   );
 }

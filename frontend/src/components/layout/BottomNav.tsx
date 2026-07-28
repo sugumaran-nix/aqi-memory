@@ -16,11 +16,13 @@ export default function BottomNav() {
 
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 flex items-center justify-around border-t lg:hidden z-20"
+      className="fixed bottom-0 left-0 right-0 flex items-center justify-around lg:hidden z-20 no-print"
       style={{
-        backgroundColor: "var(--bg-surface)",
-        borderColor: "var(--border)",
-        height: 56,
+        backgroundColor: "rgba(13, 17, 23, 0.92)",
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
+        borderTop: "1px solid var(--border)",
+        height: "var(--bottom-nav-h)",
       }}
     >
       {NAV.map(({ href, label, icon: Icon }) => {
@@ -29,9 +31,18 @@ export default function BottomNav() {
           <Link
             key={href}
             href={href}
-            className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-[10px] no-underline transition-colors"
-            style={{ color: isActive ? "var(--accent)" : "var(--text-muted)" }}
+            className="flex flex-col items-center gap-1 px-3 py-2 text-[10px] font-medium no-underline relative"
+            style={{
+              color: isActive ? "var(--accent)" : "var(--text-muted)",
+              transition: "color 150ms",
+            }}
           >
+            {isActive && (
+              <span
+                className="absolute -top-px left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-b"
+                style={{ backgroundColor: "var(--accent)" }}
+              />
+            )}
             <Icon size={20} />
             {label}
           </Link>

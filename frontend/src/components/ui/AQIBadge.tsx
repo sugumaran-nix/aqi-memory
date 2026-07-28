@@ -12,20 +12,24 @@ export default function AQIBadge({ aqi, size = "md" }: AQIBadgeProps) {
   const category = getAQICategory(aqi);
 
   const sizeClasses = {
-    sm: "text-xs px-2 py-0.5 font-medium",
+    sm: "text-xs px-2 py-0.5 font-semibold",
     md: "text-sm px-3 py-1 font-semibold",
-    lg: "text-3xl px-6 py-3 font-mono",
+    lg: "text-3xl px-6 py-3 font-mono font-bold",
   };
 
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full ${sizeClasses[size]}`}
-      style={{ backgroundColor: color, color: textColor }}
+      style={{
+        backgroundColor: color,
+        color: textColor,
+        boxShadow: `0 0 12px ${color}40`,
+      }}
       title={category ?? undefined}
     >
       {aqi != null ? aqi : "—"}
       {size !== "lg" && category && (
-        <span className="opacity-80 text-[0.75em]">{category}</span>
+        <span className="opacity-75 text-[0.75em]">{category}</span>
       )}
     </span>
   );

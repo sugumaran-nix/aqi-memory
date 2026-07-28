@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Sun, Moon, Github, Search, X } from "lucide-react";
+import { Sun, Moon, Github, Search, X, Zap } from "lucide-react";
 import { useCities, useLiveStats } from "@/lib/api";
 import AQIBadge from "@/components/ui/AQIBadge";
 
@@ -10,13 +10,13 @@ export default function TopBar() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [query, setQuery] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const { data: cities } = useCities();
   const { data: stats } = useLiveStats();
 
-  // Sync theme from DOM (set by anti-flash script)
   useEffect(() => {
     const stored = localStorage.getItem("theme") as "dark" | "light" | null;
     if (stored) setTheme(stored);
@@ -28,7 +28,6 @@ export default function TopBar() {
     localStorage.setItem("theme", t);
   }
 
-  // Live indicator: last scrape < 90 minutes ago
   const isLive = (() => {
     if (!stats?.last_updated) return false;
     try {
@@ -47,7 +46,6 @@ export default function TopBar() {
         .slice(0, 8)
     : [];
 
-  // Close dropdown on outside click
   const handleOutsideClick = useCallback((e: MouseEvent) => {
     if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
       setShowDropdown(false);
@@ -74,25 +72,24 @@ export default function TopBar() {
   }
 
   return (
-    // KEY FIX: left-0 on mobile, sidebar-left (left: 240px) on lg+
     <header
       role="banner"
-      className="fixed top-0 right-0 left-0 lg:sidebar-left z-20 flex items-center gap-3 px-4 lg:px-6 border-b no-print"
+      className="fixed top-0 right-0 left-0 lg:sidebar-left z-20 flex items-center gap-3 px-4 lg:px-6 no-print"
       style={{
         height: "var(--topbar-h)",
-        backgroundColor: "var(--bg-surface)",
-        borderColor: "var(--border)",
+        backgroundColor: "rgba(13, 17, 23, 0.85)",
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
+        borderBottom: "1px solid var(--border)",
       }}
     >
       {/* Search */}
-      <div className="relative flex-1 max-w-sm" ref={searchRef}>
-        <label htmlFor="city-search" className="sr-only">
-          Search cities
-        </label>
+      <div className="relative flex-1 max-w-md" ref={searchRef}>
+        <label htmlFor="city-search" className="sr-only">Search cities</label>
         <Search
           size={14}
           className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-          style={{ color: "var(--text-muted)" }}
+          style={{ color: isFocused ? "var(--accent)" : "var(--text-muted)", transition: "color 150ms" }}
           aria-hidden="true"
         />
         <input
@@ -100,19 +97,21 @@ export default function TopBar() {
           id="city-search"
           type="search"
           autoComplete="off"
-          placeholder="Search city…"
+          placeholder="Search city or state…"
           value={query}
           onChange={(e) => { setQuery(e.target.value); setShowDropdown(true); }}
-          onFocus={() => query.trim().length >= 2 && setShowDropdown(true)}
+          onFocus={() => { setIsFocused(true); query.trim().length >= 2 && setShowDropdown(true); }}
+          onBlur={() => setIsFocused(false)}
           onKeyDown={handleKeyDown}
           aria-controls="city-search-results"
           aria-expanded={showDropdown && filtered.length > 0}
           aria-haspopup="listbox"
-          className="w-full pl-8 pr-8 py-2 rounded-lg text-sm border outline-none"
+          className="w-full pl-9 pr-8 py-2 rounded-lg text-sm border outline-none"
           style={{
-            backgroundColor: "var(--bg-card)",
-            borderColor: "var(--border)",
+            backgroundColor: isFocused ? "var(--bg-elevated)" : "var(--bg-card)",
+            borderColor: isFocused ? "var(--border-bright)" : "var(--border)",
             color: "var(--text-primary)",
+            transition: "all 200ms ease-out",
           }}
         />
         {query && (
@@ -132,21 +131,23 @@ export default function TopBar() {
             id="city-search-results"
             role="listbox"
             aria-label="City search results"
-            className="absolute top-full left-0 right-0 mt-1 rounded-lg border overflow-hidden z-50 shadow-xl"
-            style={{ backgroundColor: "var(--bg-card)", borderColor: "var(--border)" }}
+            className="absolute top-full left-0 right-0 mt-2 rounded-xl border overflow-hidden z-50"
+            style={{
+              backgroundColor: "var(--bg-card)",
+              borderColor: "var(--border)",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.6)",
+            }}
           >
             {filtered.map((c) => (
               <li key={c.city} role="option" aria-selected={false}>
                 <button
                   onClick={() => navigateToCity(c.city)}
-                  className="flex items-center justify-between w-full px-4 py-2.5 text-sm text-left transition-colors hover:bg-white/5"
-                  style={{ borderBottom: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  className="flex items-center justify-between w-full px-4 py-3 text-sm text-left table-row-hover"
+                  style={{ borderBottom: "1px solid var(--border-subtle)", color: "var(--text-primary)" }}
                 >
                   <span>
                     {c.city}
-                    <span className="text-xs ml-1.5" style={{ color: "var(--text-muted)" }}>
-                      {c.state}
-                    </span>
+                    <span className="text-xs ml-2" style={{ color: "var(--text-muted)" }}>{c.state}</span>
                   </span>
                   <AQIBadge aqi={c.latest_aqi} size="sm" />
                 </button>
@@ -159,15 +160,15 @@ export default function TopBar() {
       {/* Live indicator */}
       {isLive && (
         <div
-          className="hidden sm:flex items-center gap-1.5 text-xs font-medium shrink-0"
-          style={{ color: "var(--accent)" }}
+          className="hidden sm:flex items-center gap-2 text-xs font-medium shrink-0 px-2.5 py-1 rounded-full"
+          style={{
+            color: "var(--accent)",
+            backgroundColor: "var(--color-primary-glow)",
+            border: "1px solid rgba(0,229,160,0.2)",
+          }}
           aria-label="Data is live"
         >
-          <span
-            className="w-2 h-2 rounded-full pulse-dot shrink-0"
-            style={{ backgroundColor: "var(--accent)" }}
-            aria-hidden="true"
-          />
+          <Zap size={11} aria-hidden="true" />
           Live
         </div>
       )}
@@ -180,21 +181,21 @@ export default function TopBar() {
         aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
       >
         {theme === "dark"
-          ? <Sun size={17} aria-hidden="true" />
-          : <Moon size={17} aria-hidden="true" />
+          ? <Sun size={16} aria-hidden="true" />
+          : <Moon size={16} aria-hidden="true" />
         }
       </button>
 
       {/* GitHub */}
       <a
-        href="https://github.com/your-username/aqi-memory"
+        href="https://github.com/sugumaran-nix/aqi-memory"
         target="_blank"
         rel="noopener noreferrer"
         className="p-2 rounded-lg transition-colors hover:bg-white/5 shrink-0 hidden sm:block"
         style={{ color: "var(--text-muted)" }}
         aria-label="View source on GitHub (opens in new tab)"
       >
-        <Github size={17} aria-hidden="true" />
+        <Github size={16} aria-hidden="true" />
       </a>
     </header>
   );

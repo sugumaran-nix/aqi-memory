@@ -60,7 +60,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0a0a0f",
+  themeColor: "#080b0f",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -87,18 +87,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Desktop sidebar */}
         <Sidebar />
 
-        {/* Top bar — full width mobile, sidebar-offset on desktop */}
+        {/* Top bar */}
         <TopBar />
 
         {/* Offline banner */}
         <OfflineBanner />
 
-        {/* Main content area */}
+        {/* Main content */}
         <main
           id="main-content"
           tabIndex={-1}
-          className="sidebar-offset pt-[60px] pb-[56px] lg:pb-0 min-h-screen"
-          style={{ backgroundColor: "var(--bg-primary)" }}
+          className="sidebar-offset min-h-screen"
+          style={{
+            paddingTop: "var(--topbar-h)",
+            paddingBottom: "calc(var(--bottom-nav-h) + 8px)",
+            backgroundColor: "var(--bg-primary)",
+          }}
         >
           <ErrorBoundary>{children}</ErrorBoundary>
         </main>
@@ -111,7 +115,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           position="top-right"
           gutter={8}
           containerStyle={{ top: 72, right: 16 }}
-          toastOptions={{ duration: 4000 }}
+          toastOptions={{
+            duration: 4000,
+            style: {
+              background: "var(--bg-elevated)",
+              color: "var(--text-primary)",
+              border: "1px solid var(--border)",
+              borderRadius: "10px",
+              fontSize: "13px",
+            },
+          }}
         />
       </body>
     </html>
