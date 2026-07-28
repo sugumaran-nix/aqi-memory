@@ -11,7 +11,7 @@ from config import DB_PATH
 logger = logging.getLogger(__name__)
 
 _pool: list[aiosqlite.Connection] = []
-_pool_sem: asyncio.Semaphore | None = None  # guards concurrent borrowing
+_pool_lock = asyncio.Lock()
 POOL_SIZE = 5
 
 
@@ -34,44 +34,30 @@ async def _new_connection() -> aiosqlite.Connection:
     await conn.execute("PRAGMA journal_mode=WAL")
     await conn.execute("PRAGMA foreign_keys=ON")
     await conn.execute("PRAGMA synchronous=NORMAL")
-    await conn.execute("PRAGMA busy_timeout=5000")  # FIX: avoid SQLITE_BUSY on concurrent writes
     return conn
-
-
-async def _get_pool_sem() -> asyncio.Semaphore:
-    """Lazy-init a semaphore that lets POOL_SIZE tasks borrow concurrently."""
-    global _pool_sem
-    if _pool_sem is None:
-        _pool_sem = asyncio.Semaphore(POOL_SIZE)
-    return _pool_sem
 
 
 async def get_pool() -> list[aiosqlite.Connection]:
     """Lazy-initialize the connection pool."""
     global _pool
-    if not _pool:
-        for _ in range(POOL_SIZE):
-            _pool.append(await _new_connection())
+    async with _pool_lock:
+        if not _pool:
+            for _ in range(POOL_SIZE):
+                _pool.append(await _new_connection())
     return _pool
 
 
 @asynccontextmanager
 async def get_db() -> AsyncIterator[aiosqlite.Connection]:
-    """
-    Borrow a connection from the pool using a semaphore.
-    FIX: replaced asyncio.Lock-while-yielding pattern (which caused deadlocks when
-    two helpers were called inside the same request) with a Semaphore + pop/append
-    that does NOT hold the lock across the yield.
-    """
-    sem = await _get_pool_sem()
+    """Borrow a connection from the pool (round-robin)."""
     pool = await get_pool()
-
-    async with sem:
+    async with _pool_lock:
         conn = pool.pop(0)
     try:
         yield conn
     finally:
-        pool.append(conn)
+        async with _pool_lock:
+            pool.append(conn)
 
 
 async def fetchall(
@@ -140,10 +126,8 @@ async def executemany(
 
 async def close_pool() -> None:
     global _pool
-    for conn in _pool:
-        try:
+    async with _pool_lock:
+        for conn in _pool:
             await conn.close()
-        except Exception:
-            pass
-    _pool = []
+        _pool = []
     logger.info("Database pool closed")

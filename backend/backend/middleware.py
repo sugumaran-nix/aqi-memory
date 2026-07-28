@@ -60,18 +60,10 @@ _api_limiter = _RateLimiter(max_calls=200, window_seconds=60.0)
 _export_limiter = _RateLimiter(max_calls=10, window_seconds=60.0)
 
 
-import os as _os
-
-_TRUST_PROXY = _os.getenv("TRUST_PROXY", "").lower() in ("1", "true", "yes")
-
-
 def _get_client_ip(request: Request) -> str:
-    # FIX Bug 11: only trust X-Forwarded-For when explicitly configured to do so,
-    # otherwise any client can spoof it to bypass rate limiting.
-    if _TRUST_PROXY:
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
     if request.client:
         return request.client.host
     return "unknown"

@@ -142,7 +142,16 @@ async def load_stations() -> int:
         logger.error("Could not load any stations from any source")
         return 0
 
-    # Upsert — 6 columns match the 6 VALUES placeholders
+    # Upsert
+    params = [
+        (
+            s["site_id"], s["name"], s["city"], s["state"],
+            s["latitude"], s["longitude"],
+            s["name"], s["city"], s["state"], s["latitude"], s["longitude"],
+        )
+        for s in stations
+    ]
+
     await executemany(
         """
         INSERT INTO stations (site_id, name, city, state, latitude, longitude)

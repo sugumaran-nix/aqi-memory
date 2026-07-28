@@ -37,9 +37,7 @@ CREATE TABLE IF NOT EXISTS edit_log (
     original_value      REAL,
     new_value           REAL,
     change_pct          REAL,
-    severity            TEXT NOT NULL,
-    -- FIX Bug 8: prevents duplicate rows when edit detection re-runs on the same scrape pair
-    UNIQUE(site_id, reading_timestamp, field_changed, original_value, new_value)
+    severity            TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS scrape_runs (

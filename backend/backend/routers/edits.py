@@ -1,5 +1,4 @@
 import logging
-import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Query
@@ -9,11 +8,6 @@ from models import EditListResponse, EditLogItem, EditStats
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/edits", tags=["edits"])
-
-# FIX Bug 7: cache edit stats — called on every dashboard load, rarely changes
-_stats_cache: EditStats | None = None
-_stats_cache_ts: float = 0.0
-_STATS_CACHE_TTL = 120  # 2 minutes
 
 
 @router.get("", response_model=EditListResponse)
@@ -25,17 +19,11 @@ async def list_edits(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
 ):
-    # FIX Bug 6: dates are compared against UTC-stored detected_at strings.
-    # Use UTC midnight boundaries so "today in IST" results aren't cut off 5h30m early.
     now = datetime.now(timezone.utc)
     if not end_date:
         end_date = now.strftime("%Y-%m-%d")
     if not start_date:
         start_date = (now - timedelta(days=30)).strftime("%Y-%m-%d")
-
-    # Validate severity to prevent unexpected filter silently passing
-    if severity and severity not in ("minor", "moderate", "major"):
-        raise HTTPException(status_code=422, detail=f"Invalid severity: {severity!r}")
 
     conditions = ["e.detected_at BETWEEN ? AND ?"]
     params: list = [start_date + " 00:00:00", end_date + " 23:59:59"]
@@ -43,7 +31,7 @@ async def list_edits(
     if city:
         conditions.append("LOWER(s.city) = LOWER(?)")
         params.append(city)
-    if severity:
+    if severity and severity in ("minor", "moderate", "major"):
         conditions.append("e.severity = ?")
         params.append(severity)
 
@@ -100,12 +88,6 @@ async def list_edits(
 
 @router.get("/stats", response_model=EditStats)
 async def edit_stats():
-    global _stats_cache, _stats_cache_ts
-
-    now_ts = time.time()
-    if _stats_cache is not None and now_ts - _stats_cache_ts < _STATS_CACHE_TTL:
-        return _stats_cache
-
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1).strftime("%Y-%m-%d") + " 00:00:00"
 
@@ -135,7 +117,7 @@ async def edit_stats():
     )
     by_severity = {r["severity"]: r["cnt"] for r in severity_rows}
 
-    result = EditStats(
+    return EditStats(
         total_edits_all_time=total["cnt"] if total else 0,
         edits_this_month=this_month["cnt"] if this_month else 0,
         most_edited_city=most_city["city"] if most_city else None,
@@ -146,7 +128,3 @@ async def edit_stats():
             "major":    by_severity.get("major", 0),
         },
     )
-
-    _stats_cache = result
-    _stats_cache_ts = now_ts
-    return result

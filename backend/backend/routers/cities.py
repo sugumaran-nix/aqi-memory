@@ -17,9 +17,6 @@ _cities_cache: dict = {}
 _cities_cache_ts: float = 0.0
 CITIES_CACHE_TTL = 300  # seconds
 
-# Allowlist for pollutant fields used in history query (prevents SQL injection)
-_VALID_POLLUTANTS = frozenset({"aqi", "pm25", "pm10", "no2", "so2", "co", "o3", "nh3", "pb"})
-
 
 def _to_ist(utc_str: str | None) -> str | None:
     """Convert UTC datetime string to IST (+5:30)."""
@@ -33,29 +30,6 @@ def _to_ist(utc_str: str | None) -> str | None:
         return ist.strftime("%Y-%m-%d %H:%M:%S IST")
     except Exception:
         return utc_str
-
-
-def _max_ist(timestamps: list[str | None]) -> str | None:
-    """
-    FIX Bug 4: Return the latest IST timestamp by parsing, not by string sort.
-    IST timestamps with 'IST' suffix won't sort correctly as raw strings across
-    day boundaries without parsing.
-    """
-    best_dt: datetime | None = None
-    best_str: str | None = None
-    for ts in timestamps:
-        if not ts:
-            continue
-        try:
-            # Strip ' IST' suffix before parsing
-            clean = ts.replace(" IST", "").strip()
-            dt = datetime.fromisoformat(clean)
-            if best_dt is None or dt > best_dt:
-                best_dt = dt
-                best_str = ts
-        except Exception:
-            continue
-    return best_str
 
 
 @router.get("", response_model=list[CityListItem])
@@ -129,39 +103,26 @@ async def city_summary(city: str):
         raise HTTPException(status_code=404, detail=f"City not found: {city}")
 
     state = stations[0]["state"]
-
-    # FIX Bug 3: single batch query instead of one DB round-trip per station (N+1)
-    site_ids = [s["site_id"] for s in stations]
-    placeholders = ",".join("?" * len(site_ids))
-    latest_readings = await fetchall(
-        f"""
-        SELECT r.site_id, r.aqi, r.dominant_pollutant, r.scraped_at
-        FROM readings r
-        INNER JOIN (
-            SELECT site_id, MAX(scraped_at) AS max_scraped
-            FROM readings
-            WHERE site_id IN ({placeholders})
-            GROUP BY site_id
-        ) latest ON r.site_id = latest.site_id AND r.scraped_at = latest.max_scraped
-        """,
-        tuple(site_ids),
-    )
-    reading_map = {r["site_id"]: r for r in latest_readings}
-
     station_aqis = []
     station_list = []
-    dp_counts: dict[str, int] = {}
 
     for st in stations:
-        reading = reading_map.get(st["site_id"])
+        reading = await fetchone(
+            """
+            SELECT aqi, dominant_pollutant, scraped_at
+            FROM readings
+            WHERE site_id = ?
+            ORDER BY scraped_at DESC
+            LIMIT 1
+            """,
+            (st["site_id"],),
+        )
         aqi = reading["aqi"] if reading else None
         dp = reading["dominant_pollutant"] if reading else None
         upd = _to_ist(reading["scraped_at"]) if reading else None
 
         if aqi is not None:
             station_aqis.append(aqi)
-        if dp:
-            dp_counts[dp] = dp_counts.get(dp, 0) + 1
 
         station_list.append(StationWithAQI(
             site_id=st["site_id"],
@@ -179,10 +140,16 @@ async def city_summary(city: str):
     current_aqi = round(sum(station_aqis) / len(station_aqis)) if station_aqis else None
     category = get_aqi_category(current_aqi)
     advisory = HEALTH_ADVISORIES.get(category, "") if category else ""
+
+    # Dominant pollutant = most frequent across stations
+    dp_counts: dict[str, int] = {}
+    for s in station_list:
+        if s.dominant_pollutant:
+            dp_counts[s.dominant_pollutant] = dp_counts.get(s.dominant_pollutant, 0) + 1
     dominant = max(dp_counts, key=lambda k: dp_counts[k]) if dp_counts else None
 
-    # FIX Bug 4: parse timestamps before comparing to find real max
-    updated_at = _max_ist([s.updated_at for s in station_list])
+    updated_ats = [s.updated_at for s in station_list if s.updated_at]
+    updated_at = max(updated_ats) if updated_ats else None
 
     return CitySummary(
         city=city,
@@ -204,9 +171,10 @@ async def city_history(
     station_id: str | None = Query(None),
     pollutant: str = Query("aqi"),
 ):
-    # FIX Bug 5: validate pollutant against allowlist BEFORE interpolating into SQL
-    if pollutant not in _VALID_POLLUTANTS:
-        raise HTTPException(status_code=422, detail=f"Invalid pollutant: {pollutant!r}. Must be one of: {sorted(_VALID_POLLUTANTS)}")
+    # Validate pollutant
+    valid_fields = {"aqi", "pm25", "pm10", "no2", "so2", "co", "o3", "nh3", "pb"}
+    if pollutant not in valid_fields:
+        raise HTTPException(status_code=422, detail=f"Invalid pollutant: {pollutant}")
 
     # Defaults and 90-day cap
     now = datetime.now(timezone.utc)

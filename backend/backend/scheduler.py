@@ -17,10 +17,6 @@ async def _scrape_and_schedule_edit_detection():
     """Run scrape then schedule edit detection 5 minutes later."""
     run_id = await run_scrape()
 
-    if _scheduler is None:
-        logger.error("Scheduler not started — cannot schedule edit detection")
-        return
-
     # Schedule edit detection 5 minutes from now
     trigger_time = datetime.now(timezone.utc) + timedelta(minutes=5)
     _scheduler.add_job(
@@ -33,7 +29,7 @@ async def _scrape_and_schedule_edit_detection():
     logger.info("Edit detection scheduled for %s UTC", trigger_time.strftime("%H:%M:%S"))
 
 
-_scheduler: AsyncIOScheduler | None = None
+_scheduler: AsyncIOScheduler = None  # type: ignore
 
 
 async def start_scheduler() -> AsyncIOScheduler:
