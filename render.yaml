@@ -1,24 +1,31 @@
+# render.yaml — Render free tier, no disk required
+# DB lives on Turso (free hosted SQLite).
+# Set TURSO_URL and TURSO_TOKEN in Render dashboard (not here — they're secrets).
+
 services:
   - type: web
     name: aqi-memory-backend
     runtime: python
-    region: singapore          # Closest to India for lower scrape latency
-    plan: free
+    region: singapore          # Closest to India — lower CPCB scrape latency
+    plan: free                 # $0/month
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1 --loop uvloop
     healthCheckPath: /health
+    autoDeploy: true           # Redeploy on every push to main
+
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.4"
-      - key: DB_PATH
-        value: /data/aqi_memory.db
       - key: LOG_LEVEL
         value: INFO
+      - key: TRUST_PROXY
+        value: "1"             # Render sits behind a proxy — needed for correct IP in rate limiter
+      - key: TURSO_URL
+        sync: false            # Set in dashboard: libsql://<db>.turso.io
+      - key: TURSO_TOKEN
+        sync: false            # Set in dashboard: your Turso auth token
       - key: CORS_ORIGINS
-        sync: false            # Set manually in Render dashboard to your Vercel URL
-    disk:
-      name: aqi-data
-      mountPath: /data
-      sizeGB: 1                # Upgrade to 10GB if you plan to keep >1 year of data
-    autoDeploy: true
+        sync: false            # Set in dashboard after Vercel deploy: https://<you>.vercel.app
+
+    # NO disk block — database is Turso

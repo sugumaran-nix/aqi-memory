@@ -86,27 +86,39 @@ async def run_daily_summaries() -> None:
     """
     logger.info("Computing daily summaries…")
     try:
+        # Step 1: compute daily stats per station
         await execute(
             """
-            INSERT OR REPLACE INTO daily_summaries (site_id, date, avg_aqi, max_aqi, min_aqi, dominant_pollutant)
+            INSERT OR REPLACE INTO daily_summaries
+                (site_id, date, avg_aqi, max_aqi, min_aqi, dominant_pollutant)
             SELECT
                 site_id,
-                date(reading_timestamp) AS date,
-                AVG(aqi)                AS avg_aqi,
-                MAX(aqi)                AS max_aqi,
-                MIN(aqi)                AS min_aqi,
-                (
-                    SELECT dominant_pollutant
-                    FROM readings r2
-                    WHERE r2.site_id = r.site_id
-                      AND date(r2.reading_timestamp) = date(r.reading_timestamp)
-                      AND r2.aqi = MAX(r.aqi)
-                    LIMIT 1
-                )                       AS dominant_pollutant
-            FROM readings r
+                date(reading_timestamp)  AS date,
+                AVG(aqi)                 AS avg_aqi,
+                MAX(aqi)                 AS max_aqi,
+                MIN(aqi)                 AS min_aqi,
+                NULL                     AS dominant_pollutant
+            FROM readings
             WHERE date(reading_timestamp) = date('now', '-1 day')
               AND aqi IS NOT NULL
             GROUP BY site_id, date(reading_timestamp)
+            """,
+        )
+        # Step 2: backfill dominant_pollutant from the reading with highest AQI
+        await execute(
+            """
+            UPDATE daily_summaries
+            SET dominant_pollutant = (
+                SELECT dominant_pollutant
+                FROM readings r
+                WHERE r.site_id = daily_summaries.site_id
+                  AND date(r.reading_timestamp) = daily_summaries.date
+                  AND r.aqi = daily_summaries.max_aqi
+                  AND r.dominant_pollutant IS NOT NULL
+                ORDER BY r.scraped_at DESC
+                LIMIT 1
+            )
+            WHERE date = date('now', '-1 day')
             """,
         )
         logger.info("Daily summaries computed")

@@ -7,6 +7,9 @@ import DataTable, { Column } from "@/components/ui/DataTable";
 import SkeletonCard from "@/components/ui/SkeletonCard";
 import { formatTimestampIST } from "@/lib/aqi";
 import type { EditLogItem } from "@/types";
+import { Card, CardContent } from "@/components/ui/shadcn/card";
+import { Badge } from "@/components/ui/shadcn/badge";
+import NumberTicker from "@/components/magicui/number-ticker";
 
 const SEVERITY_COLORS = { minor: "#facc15", moderate: "#fb923c", major: "#f87171" };
 
@@ -116,12 +119,11 @@ export default function EditsPage() {
       render: (row) => {
         const color = SEVERITY_COLORS[row.severity] ?? "#6b7280";
         return (
-          <span
-            className="px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize"
+          <Badge className="capitalize text-xs rounded-full"
             style={{ color, border: `1px solid ${color}40`, backgroundColor: `${color}12` }}
           >
             {row.severity}
-          </span>
+          </Badge>
         );
       },
     },
@@ -180,23 +182,26 @@ export default function EditsPage() {
       {stats && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           {[
-            { label: "Total edits",    value: stats.total_edits_all_time.toLocaleString() },
-            { label: "This month",     value: stats.edits_this_month.toLocaleString() },
-            { label: "Major",          value: stats.edits_by_severity.major.toLocaleString() },
+            { label: "Total edits",    value: stats.total_edits_all_time },
+            { label: "This month",     value: stats.edits_this_month },
+            { label: "Major",          value: stats.edits_by_severity.major },
             { label: "Most edited",    value: stats.most_edited_city ?? "—" },
           ].map(({ label, value }) => (
-            <div
+            <Card
               key={label}
-              className="stat-card rounded-xl p-4 border card-hover text-center"
-              style={{ backgroundColor: "var(--bg-card)", borderColor: "var(--border)" }}
+              className="stat-card card-hover text-center"
             >
-              <div className="text-2xl font-mono font-bold tracking-tight mb-0.5" style={{ color: "var(--text-primary)" }}>
-                {value}
-              </div>
-              <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-                {label}
-              </div>
-            </div>
+              <CardContent className="pt-5 pb-5">
+                <div className="text-2xl font-mono font-bold tracking-tight mb-0.5" style={{ color: "var(--text-primary)" }}>
+                  {typeof value === "number"
+                    ? <NumberTicker value={value} className="text-2xl font-mono font-bold" />
+                    : value}
+                </div>
+                <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  {label}
+                </div>
+              </CardContent>
+            </Card>
           ))}
         </div>
       )}

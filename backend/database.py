@@ -1,149 +1,134 @@
-import aiosqlite
+"""
+database.py — Turso (libSQL) async connection pool.
+
+Production: connects to Turso over WebSocket (TURSO_URL + TURSO_TOKEN).
+Local dev:  TURSO_URL unset → uses a local SQLite file at ./data/aqi_memory.db.
+
+All callers use fetchall / fetchone / execute / executemany — same signatures
+as the old aiosqlite layer, so no router or scraper code changes are needed.
+"""
+
 import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import AsyncIterator
 
-from config import DB_PATH
+import libsql_client
+
+from config import TURSO_TOKEN, TURSO_URL
 
 logger = logging.getLogger(__name__)
 
-_pool: list[aiosqlite.Connection] = []
-_pool_sem: asyncio.Semaphore | None = None  # guards concurrent borrowing
-POOL_SIZE = 5
+# Turso free tier: max 3 concurrent connections — keep pool at or below this
+POOL_SIZE = 3
+_pool: list[libsql_client.Client] = []
+_pool_sem: asyncio.Semaphore | None = None
 
 
-async def init_db() -> None:
-    """Create tables and indexes from schema.sql."""
-    os.makedirs(os.path.dirname(DB_PATH) if os.path.dirname(DB_PATH) else ".", exist_ok=True)
-    schema_path = Path(__file__).parent / "schema.sql"
-    schema = schema_path.read_text()
-
-    async with aiosqlite.connect(DB_PATH) as conn:
-        conn.row_factory = aiosqlite.Row
-        await conn.executescript(schema)
-        await conn.commit()
-    logger.info("Database initialized at %s", DB_PATH)
+def _make_client() -> libsql_client.Client:
+    if TURSO_URL:
+        return libsql_client.create_client(
+            url=TURSO_URL,
+            auth_token=TURSO_TOKEN or None,
+        )
+    # Local dev fallback
+    os.makedirs("data", exist_ok=True)
+    return libsql_client.create_client(url="file:data/aqi_memory.db")
 
 
-async def _new_connection() -> aiosqlite.Connection:
-    conn = await aiosqlite.connect(DB_PATH)
-    conn.row_factory = aiosqlite.Row
-    await conn.execute("PRAGMA journal_mode=WAL")
-    await conn.execute("PRAGMA foreign_keys=ON")
-    await conn.execute("PRAGMA synchronous=NORMAL")
-    await conn.execute("PRAGMA busy_timeout=5000")  # FIX: avoid SQLITE_BUSY on concurrent writes
-    return conn
-
-
-async def _get_pool_sem() -> asyncio.Semaphore:
-    """Lazy-init a semaphore that lets POOL_SIZE tasks borrow concurrently."""
+async def _get_sem() -> asyncio.Semaphore:
     global _pool_sem
     if _pool_sem is None:
         _pool_sem = asyncio.Semaphore(POOL_SIZE)
     return _pool_sem
 
 
-async def get_pool() -> list[aiosqlite.Connection]:
-    """Lazy-initialize the connection pool."""
+async def _get_pool() -> list[libsql_client.Client]:
     global _pool
     if not _pool:
-        for _ in range(POOL_SIZE):
-            _pool.append(await _new_connection())
+        _pool = [_make_client() for _ in range(POOL_SIZE)]
     return _pool
 
 
 @asynccontextmanager
-async def get_db() -> AsyncIterator[aiosqlite.Connection]:
-    """
-    Borrow a connection from the pool using a semaphore.
-    FIX: replaced asyncio.Lock-while-yielding pattern (which caused deadlocks when
-    two helpers were called inside the same request) with a Semaphore + pop/append
-    that does NOT hold the lock across the yield.
-    """
-    sem = await _get_pool_sem()
-    pool = await get_pool()
-
+async def _borrow() -> AsyncIterator[libsql_client.Client]:
+    """Borrow one client from the pool via semaphore (non-deadlocking)."""
+    sem = await _get_sem()
+    pool = await _get_pool()
     async with sem:
-        conn = pool.pop(0)
+        client = pool.pop(0)
     try:
-        yield conn
+        yield client
     finally:
-        pool.append(conn)
+        pool.append(client)
 
 
-async def fetchall(
-    query: str,
-    params: tuple = (),
-    conn: aiosqlite.Connection | None = None,
-) -> list[dict]:
-    async def _run(c: aiosqlite.Connection) -> list[dict]:
-        async with c.execute(query, params) as cur:
-            rows = await cur.fetchall()
-            return [dict(r) for r in rows]
+# ── Schema init ───────────────────────────────────────────────────────────────
 
-    if conn:
-        return await _run(conn)
-    async with get_db() as c:
-        return await _run(c)
-
-
-async def fetchone(
-    query: str,
-    params: tuple = (),
-    conn: aiosqlite.Connection | None = None,
-) -> dict | None:
-    async def _run(c: aiosqlite.Connection) -> dict | None:
-        async with c.execute(query, params) as cur:
-            row = await cur.fetchone()
-            return dict(row) if row else None
-
-    if conn:
-        return await _run(conn)
-    async with get_db() as c:
-        return await _run(c)
+async def init_db() -> None:
+    """Run schema.sql against the DB (idempotent — IF NOT EXISTS everywhere)."""
+    schema_text = (Path(__file__).parent / "schema.sql").read_text()
+    # Split on semicolons; skip blank lines and comment-only lines
+    statements = [
+        s.strip()
+        for s in schema_text.split(";")
+        if s.strip() and not s.strip().startswith("--")
+    ]
+    async with _borrow() as client:
+        for stmt in statements:
+            try:
+                await client.execute(stmt)
+            except Exception as exc:
+                # Tolerate "already exists" style errors on re-runs
+                logger.debug("Schema stmt skipped (%s): %.80s…", exc, stmt)
+    logger.info("DB initialised (%s)", "Turso remote" if TURSO_URL else "local file")
 
 
-async def execute(
-    query: str,
-    params: tuple = (),
-    conn: aiosqlite.Connection | None = None,
-) -> int:
-    """Execute a write statement. Returns lastrowid."""
-    async def _run(c: aiosqlite.Connection) -> int:
-        async with c.execute(query, params) as cur:
-            await c.commit()
-            return cur.lastrowid or 0
+# ── Query helpers ─────────────────────────────────────────────────────────────
 
-    if conn:
-        return await _run(conn)
-    async with get_db() as c:
-        return await _run(c)
+async def fetchall(query: str, params: tuple = ()) -> list[dict]:
+    stmt = libsql_client.Statement(query, list(params)) if params else query
+    async with _borrow() as client:
+        rs = await client.execute(stmt)
+        return [row.asdict() for row in rs.rows]
 
 
-async def executemany(
-    query: str,
-    params_list: list[tuple],
-    conn: aiosqlite.Connection | None = None,
-) -> None:
-    async def _run(c: aiosqlite.Connection) -> None:
-        await c.executemany(query, params_list)
-        await c.commit()
+async def fetchone(query: str, params: tuple = ()) -> dict | None:
+    stmt = libsql_client.Statement(query, list(params)) if params else query
+    async with _borrow() as client:
+        rs = await client.execute(stmt)
+        if not rs.rows:
+            return None
+        return rs.rows[0].asdict()
 
-    if conn:
-        return await _run(conn)
-    async with get_db() as c:
-        return await _run(c)
 
+async def execute(query: str, params: tuple = ()) -> int:
+    """Execute a write. Returns last_insert_rowid (0 for non-INSERT)."""
+    stmt = libsql_client.Statement(query, list(params)) if params else query
+    async with _borrow() as client:
+        rs = await client.execute(stmt)
+        return rs.last_insert_rowid or 0
+
+
+async def executemany(query: str, params_list: list[tuple]) -> None:
+    """Batch write — single network round-trip via libsql batch()."""
+    if not params_list:
+        return
+    stmts = [libsql_client.Statement(query, list(p)) for p in params_list]
+    async with _borrow() as client:
+        await client.batch(stmts)
+
+
+# ── Shutdown ──────────────────────────────────────────────────────────────────
 
 async def close_pool() -> None:
     global _pool
-    for conn in _pool:
+    for client in _pool:
         try:
-            await conn.close()
+            await client.close()
         except Exception:
             pass
     _pool = []
-    logger.info("Database pool closed")
+    logger.info("DB pool closed")

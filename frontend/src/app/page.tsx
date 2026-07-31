@@ -1,247 +1,271 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Wind, Shield, TrendingUp, Clock, ChevronRight } from "lucide-react";
+import { ArrowRight, Wind, Shield, TrendingUp, Clock, ChevronRight, Zap } from "lucide-react";
 import { useLiveStats, useCities, useEdits } from "@/lib/api";
 import AQIBadge from "@/components/ui/AQIBadge";
-import SkeletonCard from "@/components/ui/SkeletonCard";
 import CitySparkline from "@/components/charts/CitySparkline";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/shadcn/card";
+import { Badge } from "@/components/ui/shadcn/badge";
+import { Button } from "@/components/ui/shadcn/button";
+import NumberTicker from "@/components/magicui/number-ticker";
+import AnimatedGradientText from "@/components/magicui/animated-gradient-text";
+import BorderBeam from "@/components/magicui/border-beam";
+import Marquee from "@/components/magicui/marquee";
 import { formatTimestampIST } from "@/lib/aqi";
+import { AreaChart, Metric, Text, Flex, BadgeDelta } from "@tremor/react";
 
-function useCountUp(target: number, duration = 1800) {
-  const [current, setCurrent] = useState(0);
-  const raf = useRef<number>(0);
-  useEffect(() => {
-    if (!target) return;
-    const start = performance.now();
-    function tick(now: number) {
-      const elapsed = now - start;
-      const progress = Math.min(elapsed / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 4);
-      setCurrent(Math.floor(eased * target));
-      if (progress < 1) raf.current = requestAnimationFrame(tick);
-    }
-    raf.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf.current);
-  }, [target, duration]);
-  return current;
-}
+const SEVERITY_COLOR = { minor: "#f59e0b", moderate: "#f97316", major: "#ef4444" } as const;
+const SEVERITY_BG    = { minor: "rgba(245,158,11,0.08)", moderate: "rgba(249,115,22,0.08)", major: "rgba(239,68,68,0.08)" } as const;
 
-const SEVERITY_COLORS = { minor: "#f59e0b", moderate: "#f97316", major: "#ef4444" };
-const SEVERITY_BG     = { minor: "rgba(245,158,11,0.08)", moderate: "rgba(249,115,22,0.08)", major: "rgba(239,68,68,0.08)" };
+const CITY_CHIPS = [
+  "Delhi","Mumbai","Kolkata","Chennai","Bengaluru","Hyderabad","Ahmedabad",
+  "Pune","Jaipur","Lucknow","Kanpur","Nagpur","Patna","Indore","Surat",
+];
 
 export default function HomePage() {
   const { data: stats, isLoading: statsLoading } = useLiveStats();
   const { data: cities, isLoading: citiesLoading } = useCities();
-  const { data: edits, isLoading: editsLoading } = useEdits({ per_page: 5 });
-
-  const countStations = useCountUp(stats?.total_stations ?? 0);
-  const countReadings = useCountUp(stats?.total_readings ?? 0);
-  const countEdits    = useCountUp(stats?.edits_caught_today ?? 0);
+  const { data: edits, isLoading: editsLoading } = useEdits({ per_page: 6 });
 
   const spotlightCities = (cities ?? []).slice(0, 6);
 
-  return (
-    <div className="page-fade px-5 lg:px-8 py-8 max-w-6xl mx-auto pb-24 lg:pb-10">
+  const isLive = (() => {
+    if (!stats?.last_updated) return false;
+    try {
+      const s = stats.last_updated.replace(" IST","").replace(" ","T")+"Z";
+      return Date.now() - new Date(s).getTime() < 90 * 60_000;
+    } catch { return false; }
+  })();
 
-      {/* ── Hero ─────────────────────────────────────────────────── */}
-      <section className="mb-14 pt-2">
-        {/* Badge */}
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-5 text-xs font-semibold tracking-wider uppercase"
-          style={{
-            color: "var(--accent)",
-            backgroundColor: "var(--color-primary-glow)",
-            border: "1px solid rgba(0,229,160,0.2)",
-          }}>
-          <Wind size={11} />
-          AQI Memory · India's Air Archive
+  // Tremor AreaChart data: edits per severity this week (for mini sparkline)
+  const editChartData = edits?.items.slice(0,10).map((e, i) => ({
+    idx: String(i + 1),
+    minor:    e.severity === "minor"    ? Math.abs(e.change_pct ?? 5) : 0,
+    moderate: e.severity === "moderate" ? Math.abs(e.change_pct ?? 12) : 0,
+    major:    e.severity === "major"    ? Math.abs(e.change_pct ?? 35) : 0,
+  })) ?? [];
+
+  return (
+    <div className="page-fade max-w-6xl mx-auto px-5 lg:px-8 py-8 pb-28 lg:pb-12">
+
+      {/* ── Hero ─────────────────────────────────────────────── */}
+      <section className="mb-16 pt-2">
+        <div className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold tracking-wider uppercase mb-6"
+          style={{ color:"var(--accent)", borderColor:"rgba(0,229,160,0.25)", backgroundColor:"rgba(0,229,160,0.07)" }}>
+          <span className="w-1.5 h-1.5 rounded-full pulse-dot" style={{ backgroundColor:"var(--accent)" }} />
+          {isLive ? "Live data" : "AQI Memory"} · India&apos;s Air Archive
         </div>
 
-        <h1 className="text-4xl lg:text-6xl font-extrabold leading-[1.1] tracking-tight mb-5"
-          style={{ color: "var(--text-primary)", letterSpacing: "-0.03em" }}>
-          India&apos;s air quality.
-          <br />
-          <span className="gradient-text">Unedited. Forever.</span>
+        <h1 className="text-5xl lg:text-7xl font-extrabold leading-[1.05] tracking-[-0.04em] mb-5">
+          India&apos;s air quality.<br />
+          <AnimatedGradientText>Unedited. Forever.</AnimatedGradientText>
         </h1>
 
-        <p className="text-lg leading-relaxed mb-8 max-w-lg"
-          style={{ color: "var(--text-secondary)", lineHeight: "1.65" }}>
-          Archiving readings from <strong style={{ color: "var(--text-primary)" }}>560+ CPCB monitoring stations</strong> every hour.
-          Catching silent data edits in real time before they disappear.
+        <p className="text-lg leading-relaxed mb-8 max-w-xl" style={{ color:"var(--text-secondary)" }}>
+          Archiving readings from{" "}
+          <strong style={{ color:"var(--text-primary)" }}>560+ CPCB monitoring stations</strong>{" "}
+          every hour — and catching silent data edits in real time.
         </p>
 
         <div className="flex flex-wrap gap-3">
-          <Link href="/cities"
-            className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm no-underline">
-            Explore cities <ArrowRight size={14} />
-          </Link>
-          <Link href="/edits"
-            className="btn-ghost inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm no-underline">
-            See caught edits <ChevronRight size={14} />
-          </Link>
+          <Button asChild size="lg">
+            <Link href="/cities" className="no-underline gap-2">
+              Explore cities <ArrowRight size={16} />
+            </Link>
+          </Button>
+          <Button asChild variant="outline" size="lg">
+            <Link href="/edits" className="no-underline gap-2">
+              See caught edits <ChevronRight size={16} />
+            </Link>
+          </Button>
         </div>
       </section>
 
-      {/* ── Stats Bar ────────────────────────────────────────────── */}
-      <section className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-14">
+      {/* ── Tremor Metric stat cards ──────────────────────────── */}
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-16">
         {[
-          { label: "Stations monitored", value: statsLoading ? null : countStations, icon: Shield, desc: "Active CPCB stations" },
-          { label: "Readings archived",  value: statsLoading ? null : countReadings, icon: Clock,  desc: "Total data points saved" },
-          { label: "Edits caught today", value: statsLoading ? null : countEdits,    icon: TrendingUp, desc: "Silent mutations flagged" },
-        ].map(({ label, value, icon: Icon, desc }) => (
-          <div key={label}
-            className="stat-card rounded-xl p-6 border card-hover"
-            style={{ backgroundColor: "var(--bg-card)", borderColor: "var(--border)" }}>
-            <div className="flex items-start justify-between mb-3">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center"
-                style={{ backgroundColor: "var(--color-primary-glow)", border: "1px solid rgba(0,229,160,0.2)" }}>
-                <Icon size={15} style={{ color: "var(--accent)" }} />
-              </div>
+          { label:"Stations monitored", icon:Shield, val: stats?.total_stations, delta:"increase", desc:"CPCB stations" },
+          { label:"Readings archived",  icon:Clock,  val: stats?.total_readings,  delta:"increase", desc:"Total data points" },
+          { label:"Edits caught today", icon:TrendingUp, val: stats?.edits_caught_today, delta: (stats?.edits_caught_today ?? 0) > 0 ? "moderateDecrease" : "unchanged", desc:"Mutations flagged" },
+        ].map(({ label, icon:Icon, val, delta, desc }) => (
+          <Card key={label} className="stat-card card-hover p-5">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center mb-3"
+              style={{ backgroundColor:"var(--color-primary-glow)", border:"1px solid rgba(0,229,160,0.2)" }}>
+              <Icon size={15} style={{ color:"var(--accent)" }} />
             </div>
-            <div className="font-mono text-3xl font-bold mb-0.5 tracking-tight"
-              style={{ color: "var(--text-primary)" }}>
-              {value != null ? value.toLocaleString() : (
-                <div className="skeleton h-8 w-24 rounded" />
-              )}
-            </div>
-            <div className="text-sm font-medium mb-0.5" style={{ color: "var(--text-secondary)" }}>{label}</div>
-            <div className="text-xs" style={{ color: "var(--text-muted)" }}>{desc}</div>
-          </div>
+            {statsLoading || val == null ? (
+              <div className="skeleton h-10 w-24 rounded mb-2" />
+            ) : (
+              <Flex alignItems="baseline" className="gap-2 mb-1">
+                <Metric className="font-mono text-3xl font-bold" style={{ color:"var(--text-primary)" }}>
+                  <NumberTicker value={val} />
+                </Metric>
+                <BadgeDelta deltaType={delta as Parameters<typeof BadgeDelta>[0]["deltaType"]} className="text-xs">
+                  {label.includes("Edits") ? (val > 0 ? "active" : "clean") : "active"}
+                </BadgeDelta>
+              </Flex>
+            )}
+            <Text className="text-sm font-medium" style={{ color:"var(--text-secondary)" }}>{label}</Text>
+            <Text className="text-xs" style={{ color:"var(--text-muted)" }}>{desc}</Text>
+          </Card>
         ))}
       </section>
 
-      {/* ── Latest Edits ─────────────────────────────────────────── */}
-      <section className="mb-14">
+      {/* ── City marquee ─────────────────────────────────────── */}
+      <div className="mb-16 overflow-hidden">
+        <Marquee pauseOnHover className="[--duration:30s]">
+          {CITY_CHIPS.map(city => (
+            <Link key={city} href={`/city/${city.toLowerCase()}`} className="no-underline mx-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                style={{ borderColor:"var(--border)", color:"var(--text-secondary)", backgroundColor:"var(--bg-card)" }}>
+                <Wind size={9} />{city}
+              </span>
+            </Link>
+          ))}
+        </Marquee>
+      </div>
+
+      {/* ── Edits + area chart ────────────────────────────────── */}
+      <section className="mb-16">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h2 className="text-xl font-bold" style={{ color: "var(--text-primary)" }}>Latest edits caught</h2>
-            <p className="text-sm mt-0.5" style={{ color: "var(--text-muted)" }}>Real-time mutation detection across all stations</p>
+            <h2 className="text-xl font-bold" style={{ color:"var(--text-primary)" }}>Latest edits caught</h2>
+            <p className="text-sm mt-0.5" style={{ color:"var(--text-muted)" }}>Real-time mutation detection across all stations</p>
           </div>
-          <Link href="/edits"
-            className="inline-flex items-center gap-1 text-sm no-underline font-medium"
-            style={{ color: "var(--accent)" }}>
-            View all <ArrowRight size={13} />
-          </Link>
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/edits" className="no-underline gap-1">View all <ArrowRight size={13} /></Link>
+          </Button>
         </div>
 
-        <div className="rounded-xl border overflow-hidden"
-          style={{ backgroundColor: "var(--bg-card)", borderColor: "var(--border)" }}>
-          {editsLoading ? (
-            <div className="p-6 space-y-4">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="skeleton h-4 rounded w-full" />
-              ))}
-            </div>
-          ) : !edits?.items.length ? (
-            <div className="py-14 text-center">
-              <Shield size={28} className="mx-auto mb-3" style={{ color: "var(--accent)" }} />
-              <p className="text-sm" style={{ color: "var(--text-muted)" }}>No edits detected yet — the archive is clean.</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ borderBottom: "1px solid var(--border)", backgroundColor: "var(--bg-surface)" }}>
-                    {["Time", "City", "Station", "Was", "Now", "Δ%", "Severity"].map((h) => (
-                      <th key={h}
-                        className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-widest"
-                        style={{ color: "var(--text-muted)" }}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {edits.items.map((edit) => {
-                    const sev = edit.severity as keyof typeof SEVERITY_COLORS;
-                    return (
-                      <tr key={edit.id} className="table-row-hover"
-                        style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-                        <td className="px-4 py-3 font-mono text-xs" style={{ color: "var(--text-muted)" }}>
-                          {formatTimestampIST(edit.detected_at)}
-                        </td>
-                        <td className="px-4 py-3 font-medium" style={{ color: "var(--text-primary)" }}>{edit.city}</td>
-                        <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>{edit.station_name}</td>
-                        <td className="px-4 py-3 font-mono font-semibold" style={{ color: "#f87171" }}>
-                          {edit.original_value?.toFixed(1) ?? "—"}
-                        </td>
-                        <td className="px-4 py-3 font-mono font-semibold" style={{ color: "var(--accent)" }}>
-                          {edit.new_value?.toFixed(1) ?? "deleted"}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-xs" style={{ color: "var(--text-muted)" }}>
-                          {edit.change_pct?.toFixed(1) ?? "—"}%
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="px-2.5 py-1 rounded-full text-xs font-semibold capitalize"
-                            style={{
-                              color: SEVERITY_COLORS[sev],
-                              backgroundColor: SEVERITY_BG[sev],
-                              border: `1px solid ${SEVERITY_COLORS[sev]}30`,
-                            }}>
-                            {edit.severity}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Edits table */}
+          <Card className="lg:col-span-2 relative overflow-hidden">
+            <BorderBeam duration={12} colorFrom="var(--accent)" colorTo="#3b82f6" />
+            {editsLoading ? (
+              <CardContent className="p-6 space-y-3">
+                {[...Array(4)].map((_,i) => <div key={i} className="skeleton h-4 rounded w-full" />)}
+              </CardContent>
+            ) : !edits?.items.length ? (
+              <CardContent className="py-16 text-center">
+                <Shield size={28} className="mx-auto mb-3" style={{ color:"var(--accent)" }} />
+                <p className="text-sm" style={{ color:"var(--text-muted)" }}>No edits detected yet — archive is clean.</p>
+              </CardContent>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr style={{ borderBottom:"1px solid var(--border)", backgroundColor:"var(--bg-surface)" }}>
+                      {["Time","City","Was → Now","Severity"].map(h => (
+                        <th key={h} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-widest"
+                          style={{ color:"var(--text-muted)" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {edits.items.map(edit => {
+                      const sev = edit.severity as keyof typeof SEVERITY_COLOR;
+                      return (
+                        <tr key={edit.id} className="transition-colors hover:bg-white/[0.02]"
+                          style={{ borderBottom:"1px solid var(--border-subtle)" }}>
+                          <td className="px-4 py-3 font-mono text-xs" style={{ color:"var(--text-muted)" }}>
+                            {formatTimestampIST(edit.detected_at)}
+                          </td>
+                          <td className="px-4 py-3 font-medium text-xs" style={{ color:"var(--text-primary)" }}>{edit.city}</td>
+                          <td className="px-4 py-3 font-mono text-xs">
+                            <span style={{ color:"#f87171" }}>{edit.original_value?.toFixed(1) ?? "—"}</span>
+                            <span style={{ color:"var(--text-muted)" }}> → </span>
+                            <span style={{ color:"var(--accent)" }}>{edit.new_value?.toFixed(1) ?? "del"}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge className="capitalize text-xs px-2.5 py-0.5 rounded-full border"
+                              style={{ color:SEVERITY_COLOR[sev], backgroundColor:SEVERITY_BG[sev], borderColor:`${SEVERITY_COLOR[sev]}30` }}>
+                              {edit.severity}
+                            </Badge>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+
+          {/* Tremor mini area chart */}
+          <Card className="p-5">
+            <CardHeader className="p-0 pb-3">
+              <CardTitle className="text-xs uppercase tracking-widest" style={{ color:"var(--text-muted)" }}>
+                Edit severity (last 10)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {editChartData.length > 0 ? (
+                <AreaChart
+                  data={editChartData}
+                  index="idx"
+                  categories={["minor","moderate","major"]}
+                  colors={["yellow","orange","red"]}
+                  showLegend
+                  showGridLines={false}
+                  showXAxis={false}
+                  className="h-36"
+                  valueFormatter={v => `${v.toFixed(1)}%`}
+                />
+              ) : (
+                <div className="h-36 flex items-center justify-center text-xs" style={{ color:"var(--text-muted)" }}>
+                  Edits will appear here after 2 scrape cycles
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </section>
 
-      {/* ── City Spotlight ───────────────────────────────────────── */}
+      {/* ── City Spotlight ───────────────────────────────────── */}
       <section>
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h2 className="text-xl font-bold" style={{ color: "var(--text-primary)" }}>City spotlight</h2>
-            <p className="text-sm mt-0.5" style={{ color: "var(--text-muted)" }}>Latest readings from major cities</p>
+            <h2 className="text-xl font-bold" style={{ color:"var(--text-primary)" }}>City spotlight</h2>
+            <p className="text-sm mt-0.5" style={{ color:"var(--text-muted)" }}>Latest readings from major cities</p>
           </div>
-          <Link href="/cities"
-            className="inline-flex items-center gap-1 text-sm no-underline font-medium"
-            style={{ color: "var(--accent)" }}>
-            All cities <ArrowRight size={13} />
-          </Link>
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/cities" className="no-underline gap-1">All cities <ArrowRight size={13} /></Link>
+          </Button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {citiesLoading
-            ? [...Array(6)].map((_, i) => <SkeletonCard key={i} lines={4} />)
-            : spotlightCities.map((city) => (
-              <Link
-                key={city.city}
-                href={`/city/${encodeURIComponent(city.city.toLowerCase())}`}
-                className="no-underline group"
-              >
-                <div className="rounded-xl p-5 border card-hover h-full"
-                  style={{ backgroundColor: "var(--bg-card)", borderColor: "var(--border)" }}>
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <div className="font-semibold" style={{ color: "var(--text-primary)" }}>{city.city}</div>
-                      <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>{city.state}</div>
+            ? [...Array(6)].map((_,i) => (
+                <Card key={i} className="p-5 space-y-3">
+                  <div className="skeleton h-4 w-28 rounded" />
+                  <div className="skeleton h-3 w-16 rounded" />
+                  <div className="skeleton h-7 w-16 rounded-full" />
+                  <div className="skeleton h-8 w-full rounded" />
+                </Card>
+              ))
+            : spotlightCities.map(city => (
+                <Link key={city.city} href={`/city/${encodeURIComponent(city.city.toLowerCase())}`} className="no-underline group">
+                  <Card className="p-5 card-hover h-full cursor-pointer">
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <div className="font-semibold" style={{ color:"var(--text-primary)" }}>{city.city}</div>
+                        <div className="text-xs mt-0.5" style={{ color:"var(--text-muted)" }}>{city.state}</div>
+                      </div>
+                      <AQIBadge aqi={city.latest_aqi} size="md" />
                     </div>
-                    <AQIBadge aqi={city.latest_aqi} size="md" />
-                  </div>
-
-                  {city.dominant_pollutant && (
-                    <div className="inline-flex items-center px-2 py-0.5 rounded-full text-xs mb-3 border"
-                      style={{ borderColor: "var(--border)", color: "var(--text-muted)", backgroundColor: "var(--bg-surface)" }}>
-                      {city.dominant_pollutant}
-                    </div>
-                  )}
-
-                  <CitySparkline city={city.city} width={200} height={36} />
-
-                  {city.updated_at && (
-                    <div className="text-[11px] mt-2 flex items-center gap-1" style={{ color: "var(--text-muted)" }}>
-                      <Clock size={9} />
-                      Updated {city.updated_at}
-                    </div>
-                  )}
-                </div>
-              </Link>
-            ))}
+                    {city.dominant_pollutant && (
+                      <Badge variant="outline" className="text-xs mb-3">{city.dominant_pollutant}</Badge>
+                    )}
+                    <CitySparkline city={city.city} width={200} height={36} />
+                    {city.updated_at && (
+                      <div className="flex items-center gap-1 mt-2 text-[11px]" style={{ color:"var(--text-muted)" }}>
+                        <Clock size={9} />{city.updated_at}
+                      </div>
+                    )}
+                  </Card>
+                </Link>
+              ))
+          }
         </div>
       </section>
     </div>

@@ -1,7 +1,19 @@
+"""
+cpcb.py — CPCB CCR scraper
+
+Two-phase design:
+  Phase 1 (HTTP): fetch pollutant data for all stations, semaphore-limited
+                  to MAX_CONCURRENT_SCRAPERS. No DB connections held.
+  Phase 2 (DB):   write all results in a single executemany batch.
+                  Uses only ONE DB connection for the entire scrape run.
+
+This keeps Turso connection usage at 1 during the scrape, leaving the other
+2 free-tier connections available for the FastAPI router.
+"""
+
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any
 
 import httpx
 
@@ -11,8 +23,8 @@ from config import (
     POLLUTANT_FIELD_MAP,
     POLLUTANTS,
 )
-from database import execute, fetchall
-from scrapers.utils import calculate_aqi, post_with_retry, random_delay
+from database import executemany, fetchall
+from scrapers.utils import calculate_aqi, get_headers, post_with_retry, random_delay
 
 logger = logging.getLogger(__name__)
 
@@ -26,137 +38,116 @@ def get_semaphore() -> asyncio.Semaphore:
     return _semaphore
 
 
-def _parse_pollutant_response(data: Any, pollutant: str) -> tuple[float | None, str | None]:
+# ── Phase 1: HTTP fetch ───────────────────────────────────────────────────────
+
+async def _fetch_station(site_id: str, client: httpx.AsyncClient) -> dict | None:
     """
-    Parse CCR getStationData response.
-    Returns (avg_value, reading_timestamp) or (None, None).
+    Fetch all pollutants for one station from CPCB CCR.
+    Pure HTTP — no DB calls. Returns a row dict or None on failure.
     """
-    if not isinstance(data, dict):
-        logger.debug("Non-dict response for %s: %s", pollutant, type(data))
-        return None, None
+    pollutant_values: dict[str, float | None] = {}
+    reading_timestamp: str | None = None
 
-    # CCR may wrap in various keys
-    body = data
-    for key in ("body", "data", "result", "stationData"):
-        if key in data and isinstance(data[key], dict):
-            body = data[key]
-            break
-        elif key in data and isinstance(data[key], list) and data[key]:
-            body = data[key][0]
-            break
-
-    # Extract average value
-    avg_val = None
-    for key in ("avgValue", "avg_value", "average", "value", "concentration"):
-        v = body.get(key)
-        if v not in (None, "", "NA", "---", "N/A"):
-            try:
-                avg_val = float(v)
-                break
-            except (ValueError, TypeError):
-                continue
-
-    # Extract reading timestamp
-    ts = None
-    for key in ("requestTime", "request_time", "timestamp", "time", "date", "lastUpdated"):
-        t = body.get(key)
-        if t and str(t).strip() not in ("", "NA", "N/A"):
-            ts = str(t).strip()
-            break
-
-    return avg_val, ts
-
-
-async def scrape_station(site_id: str, client: httpx.AsyncClient) -> dict | None:
-    """
-    Scrape all 8 pollutants for a single station.
-    Never raises — all exceptions caught and logged.
-    Returns dict of {field: value, ...} + aqi + dominant_pollutant, or None on total failure.
-    """
-    try:
-        pollutant_values: dict[str, float | None] = {}
-        reading_timestamp: str | None = None
-
-        for pollutant in POLLUTANTS:
-            field = POLLUTANT_FIELD_MAP[pollutant]
-            payload = {"siteId": site_id, "parameterName": pollutant}
-
-            try:
-                data = await post_with_retry(client, CCR_DATA_URL, payload)
-            except Exception as exc:
-                logger.warning("Post error site=%s pollutant=%s: %s", site_id, pollutant, exc)
-                pollutant_values[field] = None
-                await random_delay()
-                continue
-
-            if data is None:
-                logger.debug("No data for site=%s pollutant=%s", site_id, pollutant)
-                pollutant_values[field] = None
-            else:
-                value, ts = _parse_pollutant_response(data, pollutant)
-                pollutant_values[field] = value
-                if ts and reading_timestamp is None:
-                    reading_timestamp = ts
-
-            # Be polite — delay between pollutant requests for same station
-            if pollutant != POLLUTANTS[-1]:
-                await random_delay()
-
-        # If we got no timestamp at all, use scrape time
-        if reading_timestamp is None:
-            reading_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-
-        aqi, dominant_pollutant = calculate_aqi(pollutant_values)
-
-        scraped_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-
-        try:
-            await execute(
-                """
-                INSERT OR IGNORE INTO readings
-                    (site_id, scraped_at, reading_timestamp,
-                     pm25, pm10, no2, so2, co, o3, nh3, pb,
-                     aqi, dominant_pollutant)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    site_id, scraped_at, reading_timestamp,
-                    pollutant_values.get("pm25"),
-                    pollutant_values.get("pm10"),
-                    pollutant_values.get("no2"),
-                    pollutant_values.get("so2"),
-                    pollutant_values.get("co"),
-                    pollutant_values.get("o3"),
-                    pollutant_values.get("nh3"),
-                    pollutant_values.get("pb"),
-                    aqi, dominant_pollutant,
-                ),
-            )
-        except Exception as db_exc:
-            logger.error("DB write error for site=%s: %s", site_id, db_exc)
-            # Don't abort — return the data anyway
-
-        return {
-            "site_id": site_id,
-            "scraped_at": scraped_at,
-            "reading_timestamp": reading_timestamp,
-            **pollutant_values,
-            "aqi": aqi,
-            "dominant_pollutant": dominant_pollutant,
+    for pollutant in POLLUTANTS:
+        payload = {
+            "site_id":   site_id,
+            "parameter": pollutant,
         }
+        try:
+            data = await post_with_retry(client, CCR_DATA_URL, payload)
+        except Exception as exc:
+            logger.warning("Fetch error site=%s pollutant=%s: %s", site_id, pollutant, exc)
+            pollutant_values[POLLUTANT_FIELD_MAP[pollutant]] = None
+            continue
 
-    except Exception as exc:
-        logger.error("Unexpected error scraping site=%s: %s", site_id, exc, exc_info=True)
-        return None
+        if not data:
+            pollutant_values[POLLUTANT_FIELD_MAP[pollutant]] = None
+            continue
 
+        # Parse concentration value
+        try:
+            records = data.get("data", data) if isinstance(data, dict) else data
+            if isinstance(records, list) and records:
+                latest = records[-1]
+                raw = latest.get("concentration") or latest.get("value")
+                pollutant_values[POLLUTANT_FIELD_MAP[pollutant]] = float(raw) if raw is not None else None
+                if reading_timestamp is None:
+                    ts = latest.get("to_date") or latest.get("from_date") or latest.get("date")
+                    if ts:
+                        reading_timestamp = str(ts)
+            else:
+                pollutant_values[POLLUTANT_FIELD_MAP[pollutant]] = None
+        except (ValueError, TypeError, KeyError):
+            pollutant_values[POLLUTANT_FIELD_MAP[pollutant]] = None
+
+        if pollutant != POLLUTANTS[-1]:
+            await random_delay()
+
+    if reading_timestamp is None:
+        reading_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    aqi, dominant_pollutant = calculate_aqi(pollutant_values)
+
+    return {
+        "site_id":           site_id,
+        "scraped_at":        datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "reading_timestamp": reading_timestamp,
+        **pollutant_values,
+        "aqi":               aqi,
+        "dominant_pollutant": dominant_pollutant,
+    }
+
+
+async def _fetch_with_sem(site_id: str, client: httpx.AsyncClient) -> dict | None:
+    async with get_semaphore():
+        return await _fetch_station(site_id, client)
+
+
+# ── Phase 2: DB write (single batch) ─────────────────────────────────────────
+
+async def _write_readings(rows: list[dict]) -> int:
+    """
+    Write all fetched readings to Turso in ONE executemany call.
+    Uses a single DB connection for the entire batch.
+    """
+    if not rows:
+        return 0
+
+    params = [
+        (
+            r["site_id"], r["scraped_at"], r["reading_timestamp"],
+            r.get("pm25"), r.get("pm10"), r.get("no2"), r.get("so2"),
+            r.get("co"),   r.get("o3"),   r.get("nh3"), r.get("pb"),
+            r.get("aqi"),  r.get("dominant_pollutant"),
+        )
+        for r in rows
+    ]
+
+    await executemany(
+        """
+        INSERT OR IGNORE INTO readings
+            (site_id, scraped_at, reading_timestamp,
+             pm25, pm10, no2, so2, co, o3, nh3, pb,
+             aqi, dominant_pollutant)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        params,
+    )
+    return len(params)
+
+
+# ── Main entry point ──────────────────────────────────────────────────────────
 
 async def scrape_all_stations(client: httpx.AsyncClient) -> tuple[int, int]:
     """
-    Scrape all active stations concurrently (semaphore-limited).
+    Two-phase scrape:
+      1. Fetch all station data via HTTP (semaphore-limited, no DB connections).
+      2. Write all results in one batch (single DB connection).
+
     Returns (succeeded, failed).
     """
     rows = await fetchall(
-        "SELECT site_id FROM stations WHERE is_active = 1 ORDER BY city, name"
+        "SELECT site_id FROM stations WHERE is_active = 1 ORDER BY site_id"
     )
     site_ids = [r["site_id"] for r in rows]
 
@@ -164,34 +155,36 @@ async def scrape_all_stations(client: httpx.AsyncClient) -> tuple[int, int]:
         logger.warning("No active stations in DB — skipping scrape")
         return 0, 0
 
-    logger.info("Starting scrape of %d stations…", len(site_ids))
+    logger.info("Phase 1: fetching %d stations (HTTP only)…", len(site_ids))
 
-    sem = get_semaphore()
-    succeeded = 0
-    failed = 0
-
-    async def _scrape_with_sem(site_id: str) -> bool:
-        async with sem:
-            result = await scrape_station(site_id, client)
-            return result is not None
-
-    tasks = [asyncio.create_task(_scrape_with_sem(sid)) for sid in site_ids]
+    # Phase 1: concurrent HTTP fetches — no DB connections held
+    tasks = [asyncio.create_task(_fetch_with_sem(sid, client)) for sid in site_ids]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
+    succeeded_rows: list[dict] = []
+    failed = 0
     for r in results:
         if isinstance(r, Exception):
+            logger.error("Station fetch raised: %s", r)
             failed += 1
-        elif r:
-            succeeded += 1
+        elif r is None:
+            failed += 1
         else:
-            failed += 1
+            succeeded_rows.append(r)
+
+    logger.info("Phase 1 done: %d fetched, %d failed", len(succeeded_rows), failed)
+
+    # Phase 2: single-batch DB write
+    if succeeded_rows:
+        logger.info("Phase 2: writing %d readings to Turso…", len(succeeded_rows))
+        written = await _write_readings(succeeded_rows)
+        logger.info("Phase 2 done: %d rows written", written)
 
     failure_rate = failed / len(site_ids) if site_ids else 0
     if failure_rate > 0.5:
         logger.critical(
-            "SCRAPE FAILURE RATE %.0f%% — %d/%d stations failed",
+            "HIGH FAILURE RATE %.0f%% — %d/%d stations failed",
             failure_rate * 100, failed, len(site_ids),
         )
 
-    logger.info("Scrape complete: %d succeeded, %d failed", succeeded, failed)
-    return succeeded, failed
+    return len(succeeded_rows), failed
