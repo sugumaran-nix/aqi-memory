@@ -2,18 +2,24 @@
 const nextConfig = {
   reactStrictMode: true,
 
-  // Tremor and framer-motion ship ESM — Next.js 14 needs to transpile them
   transpilePackages: [
     "@tremor/react",
     "framer-motion",
   ],
 
-  // Allow NEXT_PUBLIC_API_URL to be set at build time; no rewrite needed
   async rewrites() {
-    return [];
+    // Proxy /api/backend/* → Render backend
+    // The browser only ever talks to the Vercel domain, so CORS never applies.
+    const backend =
+      process.env.NEXT_PUBLIC_API_URL || "https://aqi-memory.onrender.com";
+    return [
+      {
+        source: "/api/backend/:path*",
+        destination: `${backend}/:path*`,
+      },
+    ];
   },
 
-  // Silence harmless Recharts/Tremor "defaultProps" warnings in Next.js 14
   webpack(config) {
     config.resolve.alias = {
       ...config.resolve.alias,
