@@ -5,7 +5,13 @@ import type {
   EditStats, HistoryPoint, LiveStats, Reading,
 } from "@/types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// In the browser, use the Next.js rewrite proxy so the browser never makes a
+// cross-origin request to Render — CORS is eliminated entirely.
+// In local dev (SSR/server side), hit the backend directly via env var.
+const API_URL =
+  typeof window !== "undefined"
+    ? "/api/backend"
+    : (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000");
 
 const BASE_SWR: SWRConfiguration = {
   revalidateOnFocus: false,
@@ -14,7 +20,6 @@ const BASE_SWR: SWRConfiguration = {
   errorRetryCount: 3,
   errorRetryInterval: 5_000,
   onError: (err: Error, key: string) => {
-    // Only toast on user-visible data fetches, not background re-fetches
     if (typeof window !== "undefined") {
       const label = key.split("/").slice(-2).join("/");
       notify.error(`Failed to load ${label}. Check your connection.`);
@@ -26,7 +31,6 @@ const BASE_SWR: SWRConfiguration = {
 async function fetcher<T>(url: string): Promise<T> {
   const res = await fetch(url, {
     headers: { Accept: "application/json" },
-    // 30s timeout via AbortController
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) {
@@ -42,7 +46,7 @@ export function useLiveStats() {
   return useSWR<LiveStats>(
     `${API_URL}/stats/live`,
     fetcher<LiveStats>,
-    { ...BASE_SWR, refreshInterval: 5 * 60_000, onError: () => {} }, // silent for live bar
+    { ...BASE_SWR, refreshInterval: 5 * 60_000, onError: () => {} },
   );
 }
 
@@ -81,7 +85,7 @@ export function useCityHistory(city: string | null, params?: HistoryParams) {
   }
   return useSWR<HistoryPoint[]>(url, fetcher<HistoryPoint[]>, {
     ...BASE_SWR,
-    onError: () => {}, // chart degrades gracefully — no toast needed per-pollutant
+    onError: () => {},
   });
 }
 
