@@ -6,14 +6,21 @@ TURSO_TOKEN = os.getenv("TURSO_TOKEN", "")  # JWT auth token
 
 # ── Server ───────────────────────────────────────────────────────────────────
 LOG_LEVEL        = os.getenv("LOG_LEVEL", "INFO")
-CORS_ORIGINS_RAW = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
-CORS_ORIGINS     = [o.strip() for o in CORS_ORIGINS_RAW.split(",") if o.strip()]
-TRUST_PROXY      = os.getenv("TRUST_PROXY", "").lower() in ("1", "true", "yes")
+
+# CORS: default to "*" so the backend works before CORS_ORIGINS is set on Render.
+# After Vercel deploy, set CORS_ORIGINS=https://your-app.vercel.app in Render env.
+_raw = os.getenv("CORS_ORIGINS", "*").strip()
+if _raw == "*":
+    CORS_ORIGINS = ["*"]
+else:
+    CORS_ORIGINS = [o.strip() for o in _raw.split(",") if o.strip()]
+
+TRUST_PROXY = os.getenv("TRUST_PROXY", "").lower() in ("1", "true", "yes")
 
 # ── Scraper ──────────────────────────────────────────────────────────────────
 SCRAPE_INTERVAL_MINUTES = 60
-MAX_CONCURRENT_SCRAPERS = 3       # Parallel station fetches — be polite to CPCB
-REQUEST_DELAY_MIN       = 2.0     # Seconds between pollutant requests per station
+MAX_CONCURRENT_SCRAPERS = 3
+REQUEST_DELAY_MIN       = 2.0
 REQUEST_DELAY_MAX       = 4.0
 MAX_RETRIES             = 3
 
@@ -43,7 +50,6 @@ USER_AGENTS = [
 ]
 
 # ── AQI ──────────────────────────────────────────────────────────────────────
-# (max_aqi, category_name, hex_color)
 AQI_CATEGORIES = [
     (50,  "Good",         "#00B050"),
     (100, "Satisfactory", "#92D050"),
@@ -53,7 +59,6 @@ AQI_CATEGORIES = [
     (500, "Severe",       "#800000"),
 ]
 
-# CPCB National AQI breakpoints — concentration ranges → AQI sub-index ranges
 AQI_BREAKPOINTS: dict = {
     "pm25": {"conc": [0, 30,  60,  90,  120, 250],    "aqi": [0, 50, 100, 200, 300, 400, 500]},
     "pm10": {"conc": [0, 50, 100, 250,  350, 430],    "aqi": [0, 50, 100, 200, 300, 400, 500]},
