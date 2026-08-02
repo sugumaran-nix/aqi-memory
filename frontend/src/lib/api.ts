@@ -5,9 +5,9 @@ import type {
   EditStats, HistoryPoint, LiveStats, Reading,
 } from "@/types";
 
-// In the browser, use the Next.js rewrite proxy so the browser never makes a
-// cross-origin request to Render — CORS is eliminated entirely.
-// In local dev (SSR/server side), hit the backend directly via env var.
+// In the browser: use the Next.js rewrite proxy (/api/backend → Render).
+// The browser only ever calls the Vercel domain → no CORS issues at all.
+// In local dev / SSR: hit the backend directly via env var.
 const API_URL =
   typeof window !== "undefined"
     ? "/api/backend"

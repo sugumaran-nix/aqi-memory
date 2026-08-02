@@ -8,8 +8,8 @@ const nextConfig = {
   ],
 
   async rewrites() {
-    // Proxy /api/backend/* → Render backend
-    // The browser only ever talks to the Vercel domain, so CORS never applies.
+    // Proxy /api/backend/* → Render backend server-side.
+    // Browser never makes a cross-origin request → CORS eliminated entirely.
     const backend =
       process.env.NEXT_PUBLIC_API_URL || "https://aqi-memory.onrender.com";
     return [

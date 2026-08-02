@@ -1,21 +1,11 @@
 import os
 
-# ── Database (Turso) ─────────────────────────────────────────────────────────
-TURSO_URL   = os.getenv("TURSO_URL", "")    # libsql://<db>.turso.io  (empty = local file)
-TURSO_TOKEN = os.getenv("TURSO_TOKEN", "")  # JWT auth token
-
 # ── Server ───────────────────────────────────────────────────────────────────
-LOG_LEVEL        = os.getenv("LOG_LEVEL", "INFO")
-
-# CORS: default to "*" so the backend works before CORS_ORIGINS is set on Render.
-# After Vercel deploy, set CORS_ORIGINS=https://your-app.vercel.app in Render env.
-_raw = os.getenv("CORS_ORIGINS", "*").strip()
-if _raw == "*":
-    CORS_ORIGINS = ["*"]
-else:
-    CORS_ORIGINS = [o.strip() for o in _raw.split(",") if o.strip()]
-
+LOG_LEVEL   = os.getenv("LOG_LEVEL", "INFO")
 TRUST_PROXY = os.getenv("TRUST_PROXY", "").lower() in ("1", "true", "yes")
+
+_raw = os.getenv("CORS_ORIGINS", "*").strip()
+CORS_ORIGINS = ["*"] if _raw == "*" else [o.strip() for o in _raw.split(",") if o.strip()]
 
 # ── Scraper ──────────────────────────────────────────────────────────────────
 SCRAPE_INTERVAL_MINUTES = 60
@@ -31,25 +21,16 @@ STATION_LIST_XLSX_URL = "https://airquality.cpcb.gov.in/caaqms/download?filename
 POLLUTANTS = ["PM2.5", "PM10", "NO2", "SO2", "CO", "Ozone", "NH3", "Lead"]
 
 POLLUTANT_FIELD_MAP = {
-    "PM2.5": "pm25",
-    "PM10":  "pm10",
-    "NO2":   "no2",
-    "SO2":   "so2",
-    "CO":    "co",
-    "Ozone": "o3",
-    "NH3":   "nh3",
-    "Lead":  "pb",
+    "PM2.5": "pm25", "PM10": "pm10", "NO2": "no2",
+    "SO2": "so2", "CO": "co", "Ozone": "o3", "NH3": "nh3", "Lead": "pb",
 }
 
 USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0",
 ]
 
-# ── AQI ──────────────────────────────────────────────────────────────────────
 AQI_CATEGORIES = [
     (50,  "Good",         "#00B050"),
     (100, "Satisfactory", "#92D050"),

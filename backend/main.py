@@ -68,7 +68,7 @@ app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["GET"],           # Read-only API — no POST/PUT/DELETE from browser
     allow_headers=["*"],
     expose_headers=["X-Request-ID", "Content-Disposition"],
