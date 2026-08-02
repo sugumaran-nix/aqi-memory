@@ -15,7 +15,6 @@ from middleware import RateLimitMiddleware, RequestIDMiddleware, SecurityHeaders
 from models import HealthResponse
 from routers import cities, edits, readings, stations
 from scrapers.stations import load_stations
-from jobs.hourly_scrape import run_scrape
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -35,12 +34,9 @@ async def lifespan(app: FastAPI):
     station_count = await load_stations()
     logger.info("Loaded %d stations", station_count)
 
-    if station_count > 0:
-        logger.info("Running initial scrape…")
-        await run_scrape()
-        logger.info("Initial scrape complete")
-    else:
-        logger.warning("No stations loaded — skipping initial scrape")
+    # Do NOT run_scrape() here — scraping 560 stations takes minutes and
+    # blocks all requests during startup, causing Vercel proxy timeouts.
+    # The scheduler runs the first scrape within its normal hourly cycle.
 
     from scheduler import start_scheduler
     scheduler = await start_scheduler()
@@ -61,7 +57,6 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Middleware — order matters: outer wraps inner
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.add_middleware(RateLimitMiddleware)
@@ -69,7 +64,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
     allow_credentials=False,
-    allow_methods=["GET"],           # Read-only API — no POST/PUT/DELETE from browser
+    allow_methods=["GET"],
     allow_headers=["*"],
     expose_headers=["X-Request-ID", "Content-Disposition"],
 )
@@ -83,25 +78,21 @@ app.add_middleware(
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail, "status_code": exc.status_code},
+        content={"detail": exc.detail},
     )
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    errors = [
-        {"field": ".".join(str(l) for l in e["loc"]), "message": e["msg"]}
-        for e in exc.errors()
-    ]
     return JSONResponse(
         status_code=422,
-        content={"detail": "Validation error", "errors": errors},
+        content={"detail": exc.errors()},
     )
 
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
-    logger.error("Unhandled exception on %s: %s", request.url.path, exc, exc_info=True)
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error. Please try again later."},
@@ -109,63 +100,41 @@ async def generic_exception_handler(request: Request, exc: Exception):
 
 
 # ---------------------------------------------------------------------------
-# Routers
+# Core routes
 # ---------------------------------------------------------------------------
 
-app.include_router(cities.router)
-app.include_router(stations.router)
-app.include_router(readings.router)
-app.include_router(edits.router)
+@app.get("/", include_in_schema=False)
+async def root():
+    return {"name": "AQI Memory API", "docs": "/docs"}
 
 
-@app.get("/health", response_model=HealthResponse, tags=["system"])
+@app.get("/ping", include_in_schema=False)
+async def ping():
+    return {"ok": True}
+
+
+@app.get("/health", response_model=HealthResponse)
 async def health():
-    db_ok = False
-    last_scrape_at = None
-    stations_active = 0
-    total_readings = 0
-    last_scrape_duration = None
-
     try:
-        row = await fetchone("SELECT 1 AS ok")
-        db_ok = row is not None and row.get("ok") == 1
-    except Exception as exc:
-        logger.error("Health DB check failed: %s", exc)
-
-    try:
-        r = await fetchone("SELECT COUNT(*) AS cnt FROM stations WHERE is_active = 1")
-        stations_active = r["cnt"] if r else 0
+        row = await fetchone("SELECT COUNT(*) AS cnt FROM stations WHERE is_active = 1")
+        active = row["cnt"] if row else 0
+        db_ok = True
     except Exception:
-        pass
-
-    try:
-        r = await fetchone("SELECT COUNT(*) AS cnt FROM readings")
-        total_readings = r["cnt"] if r else 0
-    except Exception:
-        pass
-
-    try:
-        r = await fetchone(
-            """
-            SELECT MAX(scraped_at) AS ts,
-                   MAX(
-                       CAST((julianday(completed_at) - julianday(started_at)) * 86400 AS INTEGER)
-                   ) AS duration
-            FROM scrape_runs
-            WHERE completed_at IS NOT NULL
-            """
-        )
-        if r:
-            last_scrape_at = r["ts"]
-            last_scrape_duration = r["duration"]
-    except Exception:
-        pass
-
+        active = 0
+        db_ok = False
     return HealthResponse(
         status="ok" if db_ok else "degraded",
         db_ok=db_ok,
-        last_scrape_at=last_scrape_at,
-        stations_active=stations_active,
-        total_readings=total_readings,
-        last_scrape_duration_seconds=last_scrape_duration,
+        stations_active=active,
+        timestamp=datetime.now(timezone.utc),
     )
+
+
+# ---------------------------------------------------------------------------
+# Routers
+# ---------------------------------------------------------------------------
+
+app.include_router(cities.router,   prefix="/cities",   tags=["cities"])
+app.include_router(edits.router,    prefix="/edits",    tags=["edits"])
+app.include_router(readings.router, prefix="",          tags=["readings"])
+app.include_router(stations.router, prefix="/stations", tags=["stations"])

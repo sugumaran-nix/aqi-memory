@@ -18,7 +18,7 @@ const BASE_SWR: SWRConfiguration = {
   dedupingInterval: 60_000,
   shouldRetryOnError: true,
   errorRetryCount: 3,
-  errorRetryInterval: 5_000,
+  errorRetryInterval: 15_000,
   onError: (err: Error, key: string) => {
     if (typeof window !== "undefined") {
       const label = key.split("/").slice(-2).join("/");
@@ -31,7 +31,7 @@ const BASE_SWR: SWRConfiguration = {
 async function fetcher<T>(url: string): Promise<T> {
   const res = await fetch(url, {
     headers: { Accept: "application/json" },
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(90_000),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

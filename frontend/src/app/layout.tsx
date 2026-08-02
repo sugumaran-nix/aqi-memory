@@ -7,6 +7,7 @@ import TopBar from "@/components/layout/TopBar";
 import BottomNav from "@/components/layout/BottomNav";
 import OfflineBanner from "@/components/ui/OfflineBanner";
 import ErrorBoundary from "@/components/ui/ErrorBoundary";
+import KeepAlive from "@/components/KeepAlive";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -104,6 +105,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             backgroundColor: "var(--bg-primary)",
           }}
         >
+          <KeepAlive />
           <ErrorBoundary>{children}</ErrorBoundary>
         </main>
 
