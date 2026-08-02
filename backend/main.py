@@ -14,7 +14,6 @@ from database import close_pool, fetchone, init_db
 from middleware import RateLimitMiddleware, RequestIDMiddleware, SecurityHeadersMiddleware
 from models import HealthResponse
 from routers import cities, edits, readings, stations
-from scrapers.stations import load_stations
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -27,22 +26,27 @@ os.makedirs("data", exist_ok=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # ------------------------------------------------------------------ #
+    # STARTUP — must finish fast so Render's port scanner sees us in time  #
+    # ------------------------------------------------------------------ #
     logger.info("=== AQI Memory starting up ===")
+
+    # 1. Init DB schema (pure local disk, fast)
     await init_db()
     logger.info("Database ready")
 
-    station_count = await load_stations()
-    logger.info("Loaded %d stations", station_count)
-
-    # Do NOT run_scrape() here — scraping 560 stations takes minutes and
-    # blocks all requests during startup, causing Vercel proxy timeouts.
-    # The scheduler runs the first scrape within its normal hourly cycle.
-
+    # 2. Start scheduler — station loading + first scrape happen inside it
+    #    as background jobs, NOT blocking startup
     from scheduler import start_scheduler
     scheduler = await start_scheduler()
 
+    logger.info("=== Startup complete — server ready ===")
+
     yield
 
+    # ------------------------------------------------------------------ #
+    # SHUTDOWN                                                             #
+    # ------------------------------------------------------------------ #
     scheduler.shutdown(wait=False)
     await close_pool()
     logger.info("=== AQI Memory shutdown complete ===")
@@ -71,32 +75,23 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------------------------
-# Structured error handlers
+# Error handlers
 # ---------------------------------------------------------------------------
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail},
-    )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    return JSONResponse(
-        status_code=422,
-        content={"detail": exc.errors()},
-    )
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
     logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error. Please try again later."},
-    )
+    return JSONResponse(status_code=500, content={"detail": "Internal server error."})
 
 
 # ---------------------------------------------------------------------------
@@ -126,12 +121,11 @@ async def health():
         status="ok" if db_ok else "degraded",
         db_ok=db_ok,
         stations_active=active,
-        timestamp=datetime.now(timezone.utc),
     )
 
 
 # ---------------------------------------------------------------------------
-# Routers
+# Routers (prefix already defined on each router)
 # ---------------------------------------------------------------------------
 
 app.include_router(cities.router)
