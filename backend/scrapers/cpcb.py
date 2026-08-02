@@ -5,10 +5,6 @@ Two-phase design:
   Phase 1 (HTTP): fetch pollutant data for all stations, semaphore-limited
                   to MAX_CONCURRENT_SCRAPERS. No DB connections held.
   Phase 2 (DB):   write all results in a single executemany batch.
-                  Uses only ONE DB connection for the entire scrape run.
-
-This keeps Turso connection usage at 1 during the scrape, leaving the other
-2 free-tier connections available for the FastAPI router.
 """
 
 import asyncio
@@ -176,7 +172,7 @@ async def scrape_all_stations(client: httpx.AsyncClient) -> tuple[int, int]:
 
     # Phase 2: single-batch DB write
     if succeeded_rows:
-        logger.info("Phase 2: writing %d readings to Turso…", len(succeeded_rows))
+        logger.info("Phase 2: writing %d readings to DB…", len(succeeded_rows))
         written = await _write_readings(succeeded_rows)
         logger.info("Phase 2 done: %d rows written", written)
 

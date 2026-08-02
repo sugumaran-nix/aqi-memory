@@ -10,7 +10,7 @@ from jobs.hourly_scrape import run_daily_summaries, run_scrape, run_weekly_clean
 
 logger = logging.getLogger(__name__)
 
-IST_OFFSET = "+05:30"
+_scheduler: AsyncIOScheduler | None = None
 
 
 async def _scrape_and_schedule_edit_detection():
@@ -21,7 +21,6 @@ async def _scrape_and_schedule_edit_detection():
         logger.error("Scheduler not started — cannot schedule edit detection")
         return
 
-    # Schedule edit detection 5 minutes from now
     trigger_time = datetime.now(timezone.utc) + timedelta(minutes=5)
     _scheduler.add_job(
         run_edit_detection,
@@ -31,9 +30,6 @@ async def _scrape_and_schedule_edit_detection():
         misfire_grace_time=300,
     )
     logger.info("Edit detection scheduled for %s UTC", trigger_time.strftime("%H:%M:%S"))
-
-
-_scheduler: AsyncIOScheduler | None = None
 
 
 async def start_scheduler() -> AsyncIOScheduler:
@@ -68,6 +64,20 @@ async def start_scheduler() -> AsyncIOScheduler:
         misfire_grace_time=7200,
     )
 
+    # Run first scrape 2 minutes after startup so dashboard isn't empty
+    # on fresh deploy. Subsequent runs follow the hourly cron above.
+    first_scrape_time = datetime.now(timezone.utc) + timedelta(minutes=2)
+    _scheduler.add_job(
+        _scrape_and_schedule_edit_detection,
+        trigger=DateTrigger(run_date=first_scrape_time),
+        id="initial_scrape",
+        replace_existing=True,
+        misfire_grace_time=300,
+    )
+
     _scheduler.start()
-    logger.info("Scheduler started — hourly scrape, daily summaries, weekly cleanup")
+    logger.info(
+        "Scheduler started — first scrape at %s UTC, then hourly",
+        first_scrape_time.strftime("%H:%M:%S"),
+    )
     return _scheduler

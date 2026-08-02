@@ -1,28 +1,24 @@
 """
 database.py — aiosqlite (plain SQLite on local disk).
 No Turso, no external DB, no env vars needed.
-DB file lives at ./data/aqi_memory.db
 """
 
 import asyncio
 import logging
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 
 DB_PATH = Path("data/aqi_memory.db")
 logger = logging.getLogger(__name__)
 
-_lock = asyncio.Lock()
+_write_lock = asyncio.Lock()
 
 
-async def _connect() -> aiosqlite.Connection:
+def _db_path() -> str:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = await aiosqlite.connect(DB_PATH)
-    conn.row_factory = aiosqlite.Row
-    await conn.execute("PRAGMA journal_mode=WAL")
-    await conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+    return str(DB_PATH)
 
 
 async def init_db() -> None:
@@ -31,7 +27,10 @@ async def init_db() -> None:
         s.strip() for s in schema.split(";")
         if s.strip() and not s.strip().startswith("--")
     ]
-    async with await _connect() as conn:
+    async with aiosqlite.connect(_db_path()) as conn:
+        conn.row_factory = aiosqlite.Row
+        await conn.execute("PRAGMA journal_mode=WAL")
+        await conn.execute("PRAGMA foreign_keys=ON")
         for stmt in statements:
             try:
                 await conn.execute(stmt)
@@ -42,22 +41,27 @@ async def init_db() -> None:
 
 
 async def fetchall(query: str, params: tuple = ()) -> list[dict]:
-    async with await _connect() as conn:
+    async with aiosqlite.connect(_db_path()) as conn:
+        conn.row_factory = aiosqlite.Row
         async with conn.execute(query, params) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
 
 async def fetchone(query: str, params: tuple = ()) -> dict | None:
-    async with await _connect() as conn:
+    async with aiosqlite.connect(_db_path()) as conn:
+        conn.row_factory = aiosqlite.Row
         async with conn.execute(query, params) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
 
 
 async def execute(query: str, params: tuple = ()) -> int:
-    async with _lock:
-        async with await _connect() as conn:
+    async with _write_lock:
+        async with aiosqlite.connect(_db_path()) as conn:
+            conn.row_factory = aiosqlite.Row
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA foreign_keys=ON")
             cur = await conn.execute(query, params)
             await conn.commit()
             return cur.lastrowid or 0
@@ -66,8 +70,11 @@ async def execute(query: str, params: tuple = ()) -> int:
 async def executemany(query: str, params_list: list[tuple]) -> None:
     if not params_list:
         return
-    async with _lock:
-        async with await _connect() as conn:
+    async with _write_lock:
+        async with aiosqlite.connect(_db_path()) as conn:
+            conn.row_factory = aiosqlite.Row
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA foreign_keys=ON")
             await conn.executemany(query, params_list)
             await conn.commit()
 

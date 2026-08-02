@@ -1,15 +1,11 @@
 from __future__ import annotations
-from typing import Any
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict
 
 
 class HealthResponse(BaseModel):
     status: str
     db_ok: bool
-    last_scrape_at: str | None
     stations_active: int
-    total_readings: int
-    last_scrape_duration_seconds: float | None
 
 
 class StationModel(BaseModel):

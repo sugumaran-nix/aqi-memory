@@ -134,7 +134,7 @@ async def health():
 # Routers
 # ---------------------------------------------------------------------------
 
-app.include_router(cities.router,   prefix="/cities",   tags=["cities"])
-app.include_router(edits.router,    prefix="/edits",    tags=["edits"])
-app.include_router(readings.router, prefix="",          tags=["readings"])
-app.include_router(stations.router, prefix="/stations", tags=["stations"])
+app.include_router(cities.router)
+app.include_router(edits.router)
+app.include_router(readings.router)
+app.include_router(stations.router)
